@@ -45,7 +45,7 @@ If you use this code in your research, please cite our paper:
 ```bibtex
 @misc{bhaskar2025cache,
     title={Cache Me If You Can: How Many {KV}s Do You Need for Effective Long-Context {LM}s?}, 
-    author={Adithya Bhaskar and Alexander Wettig and Tianyu Gao and Yihe Dong and Danqi Chen},
+    author={Adithya Bhaskar* and Alexander Wettig* and Tianyu Gao and Yihe Dong and Danqi Chen},
     journal={arXiv preprint arXiv:2506.17121},
     year={2025}
 }
