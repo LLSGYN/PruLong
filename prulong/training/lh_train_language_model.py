@@ -14,6 +14,7 @@ from transformers import (
 )
 
 from training.modeling_flash_llama import PawLlamaForCausalLM, PawLlamaConfig
+from training.modeling_flash_pangu import PawPanguForCausalLM, PawPanguConfig
 from training.lh_trainer import Trainer, TrainingArguments
 from training.dataset import build_dataset, DataCollator, DataArguments
 from training.dataset import logger as dataset_logger
@@ -32,6 +33,16 @@ logger = logging.getLogger(__name__)
 
 @dataclass
 class ScriptArguments:
+    model_family: str = field(
+        default="llama",
+        metadata={
+            "help": "Model family to train. Supported options: 'llama', 'pangu'."
+        },
+    )
+    source_tokenizer_name: Optional[str] = field(
+        default=None,
+        metadata={"help": "Tokenizer used to decode pre-tokenized datasets before re-tokenizing for the target model."}
+    )
     model_name_or_path: Optional[str] = field(
         default=None,
         metadata={
@@ -167,7 +178,27 @@ def main():
         revision=script_args.model_revision,
         use_auth_token=True if script_args.use_auth_token else None,
     )
-    config = PawLlamaConfig.from_pretrained(
+    source_tokenizer = None
+    model_family = script_args.model_family.lower()
+    if model_family == "llama":
+        ConfigClass = PawLlamaConfig
+        ModelClass = PawLlamaForCausalLM
+    elif model_family == "pangu":
+        ConfigClass = PawPanguConfig
+        ModelClass = PawPanguForCausalLM
+        if script_args.source_tokenizer_name is None:
+            raise ValueError("Pangu training requires --source_tokenizer_name pointing to the tokenizer used for dataset preprocessing (e.g., Llama-3 tokenizer).")
+        source_tokenizer = AutoTokenizer.from_pretrained(
+            script_args.source_tokenizer_name,
+            cache_dir=script_args.cache_dir,
+            use_fast=script_args.use_fast_tokenizer,
+            revision=script_args.model_revision,
+            use_auth_token=True if script_args.use_auth_token else None,
+        )
+    else:
+        raise ValueError(f"Unsupported model_family '{script_args.model_family}'. Expected 'llama' or 'pangu'.")
+
+    config = ConfigClass.from_pretrained(
         script_args.config_name or script_args.model_name_or_path,
         cache_dir=script_args.cache_dir,
         revision=script_args.model_revision,
@@ -190,7 +221,7 @@ def main():
     config.pad_token_id = 0
 
     if script_args.model_name_or_path:
-        model = PawLlamaForCausalLM.from_pretrained(
+        model = ModelClass.from_pretrained(
             script_args.model_name_or_path,
             from_tf=bool(".ckpt" in script_args.model_name_or_path),
             config=config,
@@ -199,8 +230,8 @@ def main():
             use_auth_token=True if script_args.use_auth_token else None,
         )
     else:
-        logger.warning(f"Initializing new PawLlamaForCausalLM from scratch")
-        model = PawLlamaForCausalLM(
+        logger.warning(f"Initializing new {ModelClass.__name__} from scratch")
+        model = ModelClass(
             config,
         )
         
@@ -256,7 +287,7 @@ def main():
             for x in script_args.tokenized_mds_test
         }
 
-    data_collator = DataCollator(tokenizer, data_args)
+    data_collator = DataCollator(tokenizer, data_args, source_tokenizer=source_tokenizer)
     assert training_args.max_steps is not None, "max_steps must be set!"
     
 

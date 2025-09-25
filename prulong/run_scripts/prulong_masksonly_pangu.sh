@@ -1,5 +1,5 @@
 #!/bin/bash
-#SBATCH --job-name=prulong_masksonly
+#SBATCH --job-name=prulong_pangu_masksonly
 #SBATCH --partition=gpu
 #SBATCH --nodes=2
 #SBATCH --output=./joblog/%x-%A_%a.out
@@ -12,7 +12,10 @@
 # >>> conda activate prulong
 
 # Model and training configuration
-model=${MODEL:-"meta-llama/Llama-3.1-8B-Instruct"}
+model=${MODEL:-"model/openPangu-Embedded-1B"}
+config_name=${CONFIG_NAME:-$model}
+tokenizer=${TOKENIZER:-$model}
+source_tokenizer=${SOURCE_TOKENIZER:-"meta-llama/Llama-3.1-8B-Instruct"}
 bsz=${BSZ:-16}
 seq=${SEQ:-1}
 lr=${LR:-1e-5}
@@ -31,8 +34,7 @@ gc=${GC:-"1"}
 gc_mode=${GC_MODE:-"full"}
 
 # PruLong-specific arguments
-max_toks=${MAX_TOKS:-32768}
-# max_toks=${MAX_TOKS:-131072}
+max_toks=${MAX_TOKS:-16384}
 start_head_sparsity=${START_HEAD_SPARSITY:-0.0}
 end_head_sparsity=${END_HEAD_SPARSITY:-0.7}
 mask_learning_rate=${MASK_LEARNING_RATE:-1.0}
@@ -60,7 +62,7 @@ if [[ $freeze_masks == "true" ]]; then
     extra_name="${extra_name}_mfrozen"
 fi
 
-run_name="masksonly_$(basename $model)_bsz${bsz}_steps${steps}_lr${lr}_warmup${warmup}_sp${end_head_sparsity}_cw${context_window_if_toggled}_mlr${mask_learning_rate}_rlr${reg_learning_rate}${extra_name}${suffix}"
+run_name="masksonly_pangu_bs${bsz}_steps${steps}_lr${lr}_warmup${warmup}_sp${end_head_sparsity}_cw${context_window_if_toggled}_mlr${mask_learning_rate}_rlr${reg_learning_rate}${extra_name}${suffix}"
 
 out_dir="checkpoints/$run_name"
 mkdir -p $out_dir
@@ -120,7 +122,11 @@ base_arguments=(
     --do_train
 
     --model_name $model
-    --tokenizer_name $model
+    --config_name $config_name
+    --tokenizer_name $tokenizer
+    --source_tokenizer_name $source_tokenizer
+
+    --model_family pangu
 
     --run_name $run_name
     --output_dir $out_dir
@@ -196,4 +202,4 @@ base_arguments+=( $@ )
 
 echo "Command: ${header} ${base_arguments[@]}"
 ${header} "${base_arguments[@]}" 2>&1 | tee -a $out_dir/log.out \
-    && [ -f $out_dir/config.json ] && python save_prulong_masks.py --checkpoint $out_dir --out_path $out_dir/masks_sp${end_head_sparsity}.tsv --sparsity $end_head_sparsity 
+    && [ -f $out_dir/config.json ] && python save_prulong_masks.py --checkpoint $out_dir --model_family pangu --out_path $out_dir/masks_sp${end_head_sparsity}.tsv --sparsity $end_head_sparsity

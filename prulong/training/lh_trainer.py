@@ -67,14 +67,14 @@ from transformers.utils import (
     get_full_repo_name,
     is_apex_available,
     is_sagemaker_mp_enabled,
-    is_torch_tpu_available,
+    # is_torch_npu_available,
 )
 from transformers.optimization import get_scheduler
 from transformers import TrainingArguments as HfTrainingArguments
 
-if is_torch_tpu_available(check_device=False):
-    import torch_xla.core.xla_model as xm # type: ignore
-    import torch_xla.distributed.parallel_loader as pl # type: ignore
+# if is_torch_npu_available(check_device=False):
+#     import torch_xla.core.xla_model as xm # type: ignore
+#     import torch_xla.distributed.parallel_loader as pl # type: ignore
 
 
 if is_sagemaker_mp_enabled():
@@ -435,7 +435,7 @@ class Trainer(HFTrainer):
 
         return inputs
 
-    def compute_loss(self, model, inputs, return_outputs=False, return_output_and_metrics=False):
+    def compute_loss(self, model, inputs, return_outputs=False, return_output_and_metrics=False, num_items_in_batch=None):
         """
         How the loss is computed by Trainer. By default, all models return the loss in the first element.
 

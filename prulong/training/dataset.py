@@ -34,10 +34,61 @@ class SafeStream(Stream):
         os.rename(raw_filename + unique_extension, raw_filename)
 
 
+def retokenize_segments(
+    raw_input_ids: List[int],
+    indices: List[Tuple[int, int]],
+    source_tokenizer,
+    target_tokenizer,
+):
+    """Retokenize packed segments from the source tokenizer space into the target tokenizer space."""
+    retokenized_ids: List[int] = []
+    retokenized_indices: List[Tuple[int, int]] = []
+    cursor = 0
+
+    for start, end in indices:
+        if end <= start:
+            continue
+
+        source_tokens = raw_input_ids[start:end]
+        if len(source_tokens) == 0:
+            continue
+
+        if not isinstance(source_tokens, (list, tuple)):
+            source_tokens = source_tokens.tolist()
+
+        text = source_tokenizer.decode(
+            source_tokens,
+            skip_special_tokens=True,
+            clean_up_tokenization_spaces=False,
+        )
+
+        if not text:
+            continue
+
+        target_tokens = target_tokenizer(
+            text,
+            add_special_tokens=False,
+            return_attention_mask=False,
+        )["input_ids"]
+
+        if not isinstance(target_tokens, (list, tuple)):
+            target_tokens = list(target_tokens)
+
+        if len(target_tokens) == 0:
+            continue
+
+        retokenized_ids.extend(target_tokens)
+        retokenized_indices.append((cursor, cursor + len(target_tokens)))
+        cursor += len(target_tokens)
+
+    return retokenized_ids, retokenized_indices
+
+
 class DataCollator:
-    def __init__(self, tokenizer, args: DataArguments):
+    def __init__(self, tokenizer, args: DataArguments, source_tokenizer=None):
         self.tokenizer = tokenizer
         self.args = args
+        self.source_tokenizer = source_tokenizer
 
     @torch.no_grad()
     def __call__(self, features):
@@ -47,22 +98,41 @@ class DataCollator:
 
         available_tokens = self.args.per_device_max_tokens
         for item in features:
-            apply_instruct_masks = self.args.apply_instruct_masks and ("mask" in item)
-            indices = item["indices"] if "indices" in item else [(0, len(item["input_ids"]))]
-            if self.args.single_seq:
-                indices = [(0, len(item["input_ids"]))]
+            if self.source_tokenizer is not None and self.args.apply_instruct_masks and ("mask" in item):
+                raise NotImplementedError("Instruction masks are not supported when retokenizing from a source tokenizer.")
 
-            label_seq = torch.tensor(item["input_ids"], dtype=torch.long)
+            raw_input_ids = item["input_ids"]
+            indices = item["indices"] if "indices" in item else [(0, len(raw_input_ids))]
+            if self.args.single_seq:
+                indices = [(0, len(raw_input_ids))]
+
+            if self.source_tokenizer is not None:
+                retokenized_ids, retokenized_indices = retokenize_segments(
+                    raw_input_ids,
+                    indices,
+                    self.source_tokenizer,
+                    self.tokenizer,
+                )
+
+                if not retokenized_ids:
+                    continue
+
+                current_input_ids = retokenized_ids
+                indices = retokenized_indices if not self.args.single_seq else [(0, len(retokenized_ids))]
+            else:
+                current_input_ids = raw_input_ids
+
+            label_seq = torch.tensor(current_input_ids, dtype=torch.long)
 
             for a, b in indices:
                 b = a + min(b - a, available_tokens)
                 if b - a > 1:
-                    input_seq = torch.tensor(item["input_ids"][a:b], dtype=torch.long)
+                    input_seq = torch.tensor(current_input_ids[a:b], dtype=torch.long)
                     input_ids.append(input_seq)
 
                     _label = label_seq[a:b]
                     _label[0] = -100 # Don't predict the first token
-                    if apply_instruct_masks:
+                    if self.args.apply_instruct_masks and ("mask" in item):
                         # Read the `mask` field and set the corresponding labels to -100
                         mask = torch.tensor(item["mask"][a:b], dtype=torch.long)
                         _label[mask == 0] = -100
