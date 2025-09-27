@@ -244,6 +244,10 @@ class SparseSearchContext:
             else:
                 query_for_search = query_states.detach().view(1, -1, query_states.shape[-1])
             block_tables = self.search_fn(kv_repr, query_for_search, num_blocks_total, layer_id)
+            # print("len:", end=' ')
+            # for tb in block_tables:
+            #     print(tb.shape, end=' ')
+            # print("\n----------------------------")
         except Exception:
             block_tables = None
         tables = self._normalize_tables(layer_id, block_tables, num_blocks_total)
@@ -290,27 +294,9 @@ def make_llama_sparse_forward(layer_id: int, context: SparseSearchContext):
 
         bsz, q_len, _ = hidden_states.size()
 
-        if self.config.pretraining_tp > 1:
-            key_value_slicing = (self.num_key_value_heads * self.head_dim) // self.config.pretraining_tp
-            query_slices = self.q_proj.weight.split(
-                (self.num_heads * self.head_dim) // self.config.pretraining_tp, dim=0
-            )
-            key_slices = self.k_proj.weight.split(key_value_slicing, dim=0)
-            value_slices = self.v_proj.weight.split(key_value_slicing, dim=0)
-
-            query_states = [F.linear(hidden_states, query_slices[i]) for i in range(self.config.pretraining_tp)]
-            query_states = torch.cat(query_states, dim=-1)
-
-            key_states = [F.linear(hidden_states, key_slices[i]) for i in range(self.config.pretraining_tp)]
-            key_states = torch.cat(key_states, dim=-1)
-
-            value_states = [F.linear(hidden_states, value_slices[i]) for i in range(self.config.pretraining_tp)]
-            value_states = torch.cat(value_states, dim=-1)
-
-        else:
-            query_states = self.q_proj(hidden_states)
-            key_states = self.k_proj(hidden_states)
-            value_states = self.v_proj(hidden_states)
+        query_states = self.q_proj(hidden_states)
+        key_states = self.k_proj(hidden_states)
+        value_states = self.v_proj(hidden_states)
 
         query_states = query_states.view(bsz, q_len, self.num_heads, self.head_dim).transpose(1, 2)
         key_states = key_states.view(bsz, q_len, self.num_key_value_heads, self.head_dim).transpose(1, 2)
@@ -388,15 +374,10 @@ def make_llama_sparse_forward(layer_id: int, context: SparseSearchContext):
         attn_output = attn_output.transpose(1, 2).contiguous()
         attn_output = attn_output.reshape(bsz, q_len, -1)
 
-        if self.config.pretraining_tp > 1:
-            attn_output = attn_output.split(self.hidden_size // self.config.pretraining_tp, dim=2)
-            o_proj_slices = self.o_proj.weight.split(self.hidden_size // self.config.pretraining_tp, dim=1)
-            attn_output = sum([F.linear(attn_output[i], o_proj_slices[i]) for i in range(self.config.pretraining_tp)])
-        else:
-            attn_output = self.o_proj(attn_output)
+        attn_output = self.o_proj(attn_output)
 
         attn_weights_to_return = attn_weights if output_attentions else None
-        return attn_output, attn_weights_to_return, past_key_value
+        return attn_output, attn_weights_to_return
 
     return sparse_forward
 
@@ -406,7 +387,8 @@ def patch_sparse_attention(model, context: SparseSearchContext):
 
     layer_index = 0
     for module in model.modules():
-        if isinstance(module, LlamaAttention):
+        # if isinstance(module, PanguEmbeddedAttention):
+        if type(module).__name__ == 'PanguEmbeddedAttention':
             if not hasattr(module, "_sparse_original_forward"):
                 module._sparse_original_forward = module.forward
                 module.forward = types.MethodType(make_llama_sparse_forward(layer_index, context), module)
