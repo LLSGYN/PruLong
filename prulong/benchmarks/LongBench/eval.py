@@ -45,34 +45,37 @@ def parse_args(args=None):
     parser.add_argument('--e', action='store_true', help="Evaluate on LongBench-E")
     return parser.parse_args(args)
 
-def scorer_e(dataset, predictions, answers, lengths, all_classes):
-    scores = {"0-4k": [], "4-8k": [], "8k+": []}
-    for (prediction, ground_truths, length) in zip(predictions, answers, lengths):
-        score = 0.
-        if dataset in ["trec", "triviaqa", "samsum", "lsht"]:
-            prediction = prediction.lstrip('\n').split('\n')[0]
-        for ground_truth in ground_truths:
-            score = max(score, dataset2metric[dataset](prediction, ground_truth, all_classes=all_classes))
-        if length < 4000:
-            scores["0-4k"].append(score)
-        elif length < 8000:
-            scores["4-8k"].append(score)
-        else:
-            scores["8k+"].append(score)
-    for key in scores.keys():
-        scores[key] = round(100 * np.mean(scores[key]), 2)
-    return scores
+def compute_dataset_scores(dataset, baseline_preds, sparse_preds, sparsities, all_classes_list):
+    if len(baseline_preds) == 0:
+        return {"score": 0.0, "pass_rate": 0.0, "avg_f1": 0.0}
 
-def scorer(dataset, predictions, answers, all_classes):
-    total_score = 0.
-    for (prediction, ground_truths) in zip(predictions, answers):
-        score = 0.
+    metric_fn = dataset2metric.get(dataset)
+    if metric_fn is None:
+        return {"score": 0.0, "pass_rate": 0.0, "avg_f1": 0.0}
+
+    total_score = 0.0
+    pass_cases = 0
+    f1_scores = []
+    for idx, (baseline_pred, sparse_pred, sparsity) in enumerate(zip(baseline_preds, sparse_preds, sparsities)):
         if dataset in ["trec", "triviaqa", "samsum", "lsht"]:
-            prediction = prediction.lstrip('\n').split('\n')[0]
-        for ground_truth in ground_truths:
-            score = max(score, dataset2metric[dataset](prediction, ground_truth, all_classes=all_classes))
-        total_score += score
-    return round(100 * total_score / len(predictions), 2)
+            baseline_pred = baseline_pred.lstrip('\n').split('\n')[0]
+            sparse_pred = sparse_pred.lstrip('\n').split('\n')[0]
+        all_classes = all_classes_list[idx] if idx < len(all_classes_list) else None
+        try:
+            f1_value = metric_fn(sparse_pred, baseline_pred, all_classes=all_classes)
+        except TypeError:
+            f1_value = metric_fn(sparse_pred, baseline_pred)
+        f1_scores.append(float(f1_value))
+        if f1_value >= 0.99:
+            total_score += float(sparsity)
+            pass_cases += 1
+    count = len(baseline_preds)
+    avg_f1 = float(np.mean(f1_scores)) if f1_scores else 0.0
+    return {
+        "score": round(total_score / count, 4),
+        "pass_rate": round(pass_cases / count, 4),
+        "avg_f1": round(avg_f1, 4),
+    }
 
 if __name__ == '__main__':
     args = parse_args()
@@ -86,20 +89,22 @@ if __name__ == '__main__':
     for filename in all_files:
         if not filename.endswith("jsonl"):
             continue
-        predictions, answers, lengths = [], [], []
+        baseline_preds, sparse_preds, sparsities, all_classes_list = [], [], [], []
         dataset = filename.split('.')[0]
         with open(f"{path}{filename}", "r", encoding="utf-8") as f:
             for line in f:
                 data = json.loads(line)
-                predictions.append(data["pred"])
-                answers.append(data["answers"])
-                all_classes = data["all_classes"]
-                if "length" in data:
-                    lengths.append(data["length"])
-        if args.e:
-            score = scorer_e(dataset, predictions, answers, lengths, all_classes)
-        else:
-            score = scorer(dataset, predictions, answers, all_classes)
+                baseline = data.get("pred_full", data.get("pred", ""))
+                sparse = data.get("pred_sparse", baseline)
+                try:
+                    sparsity = float(data.get("sparsity", 0.0))
+                except (TypeError, ValueError):
+                    sparsity = 0.0
+                baseline_preds.append(baseline)
+                sparse_preds.append(sparse)
+                sparsities.append(sparsity)
+                all_classes_list.append(data.get("all_classes"))
+        score = compute_dataset_scores(dataset, baseline_preds, sparse_preds, sparsities, all_classes_list)
         scores[dataset] = score
     if args.e:
         out_path = f"pred_e/{args.model}/result.json"

@@ -16,8 +16,8 @@ model=${MODEL:-"model/openPangu-Embedded-1B"}
 config_name=${CONFIG_NAME:-$model}
 tokenizer=${TOKENIZER:-$model}
 source_tokenizer=${SOURCE_TOKENIZER:-"meta-llama/Llama-3.1-8B-Instruct"}
-bsz=${BSZ:-16}
-seq=${SEQ:-1}
+bsz=${BSZ:-64}
+seq=${SEQ:-8}
 lr=${LR:-1e-5}
 steps=${STEPS:-1000}
 save_steps=${SAVE:-200}
@@ -31,12 +31,12 @@ seq_parallel_size=${SEQ_PARALLEL_SIZE:-1}
 # 0=Disable, 1=FULL_SHARD, 2=SHARD_GRAD_OP, 3=NO_SHARD, 4=HYBRID_SHARD, 5=HYBRID_SHARD_ZERO2
 fsdp=${FSDP:-"1"}
 gc=${GC:-"1"}
-gc_mode=${GC_MODE:-"full"}
+gc_mode=${GC_MODE:-"default"}
 
 # PruLong-specific arguments
-max_toks=${MAX_TOKS:-16384}
+max_toks=${MAX_TOKS:-65536}
 start_head_sparsity=${START_HEAD_SPARSITY:-0.0}
-end_head_sparsity=${END_HEAD_SPARSITY:-0.7}
+end_head_sparsity=${END_HEAD_SPARSITY:-0.6}
 mask_learning_rate=${MASK_LEARNING_RATE:-1.0}
 reg_learning_rate=${REG_LEARNING_RATE:-1.0}
 sparsity_warmup_ratio=${SPARSITY_WARMUP_RATIO:-0.8}

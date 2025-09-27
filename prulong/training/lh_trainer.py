@@ -1067,7 +1067,7 @@ class Trainer(HFTrainer):
         # A wrapper around the original _save_checkpoint function to save streaming dataset state
 
         # Save model checkpoint
-        super()._save_checkpoint(model, trial, metrics=metrics)
+        super()._save_checkpoint(model, trial)
 
         # Get the path
         checkpoint_folder = f"{PREFIX_CHECKPOINT_DIR}-{self.state.global_step}"

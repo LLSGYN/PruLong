@@ -177,6 +177,7 @@ def main():
         use_fast=script_args.use_fast_tokenizer,
         revision=script_args.model_revision,
         use_auth_token=True if script_args.use_auth_token else None,
+        trust_remote_code=True,
     )
     source_tokenizer = None
     model_family = script_args.model_family.lower()
@@ -194,6 +195,7 @@ def main():
             use_fast=script_args.use_fast_tokenizer,
             revision=script_args.model_revision,
             use_auth_token=True if script_args.use_auth_token else None,
+            trust_remote_code=True,
         )
     else:
         raise ValueError(f"Unsupported model_family '{script_args.model_family}'. Expected 'llama' or 'pangu'.")
